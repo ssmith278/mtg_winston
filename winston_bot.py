@@ -20,7 +20,7 @@ bot.draft = winston.WinstonDraft()
 bot.player_one_member = None
 bot.player_two_member = None
 bot.current_player_member = None
-bot.draft_file = "draft_files/cube.txt"
+bot.draft_file = environ["CUBE_FILE_PATH"]
 bot.new_thread_name = "A Grand Campaign"
 bot.game_quotes = {
     "MissingPlayerOne": 

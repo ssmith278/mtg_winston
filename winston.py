@@ -291,19 +291,26 @@ class WinstonDraft:
         if card_name not in self.card_cache:
 
             if card_name in self.card_thread:
-                self.card_thread[card_name].result()
+                self.card_cache[card_name] = self.card_thread[card_name].result()
             else:
-                self.getScryfallCard(card_name)
+                self.card_cache[card_name] = self.getScryfallCard(card_name)
+            
+        card_info = self.card_cache[card_name].scryfallJson if self.card_cache[card_name] else None
 
-        card_info = self.card_cache[card_name].scryfallJson
         if card_info:
             return f"[{card_name}](<{card_info['scryfall_uri']}>)"
         
         return f"[{card_name}]<URL Not Found>"
 
     def getScryfallCard(self, card_name):
-        time.sleep(0.1)
-        self.card_cache[card_name] = scrython.cards.Named(exact=card_name) 
+        try:
+            card = scrython.cards.Named(exact=card_name)
+        except:
+            card =  None
+        finally:
+            time.sleep(0.1)
+            return card
+
 
     async def getPileInfo(self, card_pile):
         results = ""
