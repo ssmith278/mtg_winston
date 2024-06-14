@@ -1,17 +1,19 @@
-from datetime import datetime
-from typing import Any
 import discord
-from os import getenv
+import discord.ext
 import io
-from dotenv import load_dotenv
-import random
-import winston
-from winston import Players
-from discord.ext import commands
 import nest_asyncio
+import random
+from datetime import datetime
+from discord.ext import commands
+from dotenv import load_dotenv
+from os import getenv
+from typing import Any
+from winston import WinstonDraft
+from winston import Players
 
 load_dotenv()
 token = getenv("TOKEN")
+dev_guild_id = getenv("GUILD_ID")
 nest_asyncio.apply()
 
 intents = discord.Intents.default()
@@ -19,12 +21,13 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # region Bot Variables
-bot.draft = winston.WinstonDraft()
+bot.draft = WinstonDraft()
 bot.player_one_member = None
 bot.player_two_member = None
 bot.current_player_member = None
 bot.draft_file = getenv("CUBE_FILE_PATH")
 bot.new_thread_name = "A Grand Campaign"
+bot.new_thread = None
 bot.game_quotes = {
     "MissingPlayerOne": 
 				["Hold your horses! A battle needs two sides, unless of course one intends to outwit themselves."
@@ -77,11 +80,88 @@ bot.game_quotes = {
                 "A classic choice, but one that I shall meet with equal resolve.",
                 "I must admit, you've piqued my curiosity. I shall tread carefully."
 				],
+    "GameInProgress":
+                ["My dear fellow, a new challenger must wait their turn! We are in the midst of a grand battle here, a clash of intellect and strategy!"                
+                ],
 }
 
 # endregion
 
-#region Functions
+# region Events
+
+@bot.event
+async def on_ready():
+    
+    print(f"User: {bot.user} (ID: {bot.user.id})")
+    bot.tree.copy_global_to(guild=discord.Object(id=dev_guild_id))
+    await bot.tree.sync(guild=discord.Object(id=dev_guild_id))
+    print(f"Synced and ready.")
+
+
+# endregion
+
+# region Commands
+
+@bot.tree.command(name="close")
+async def shutdown(interaction: discord.Interaction):
+
+    if bot.new_thread:
+        await bot.new_thread.delete()
+    
+    await interaction.response.send_message(content='Stopped', ephemeral=True)
+    await bot.close()
+
+@bot.tree.command(name="clear")
+async def clean_up(interaction: discord.Interaction):
+    for thread in interaction.channel.threads:
+        if thread.owner_id == bot.user.id:
+            await thread.delete()
+
+    await interaction.response.send_message(content="Clear", delete_after=0.5, ephemeral=True)
+
+@bot.tree.command(name="cache")
+async def view_cache(interaction: discord.Interaction):
+    cache = bot.draft.card_cache  
+    await interaction.response.send_message(content=cache, ephemeral=True)  
+
+@bot.tree.command(name="deploy")
+async def deploy(interaction: discord.Interaction):
+    if bot.new_thread:
+        await interaction.response.send_message(content=get_quote("GameInProgress"), delete_after=2)
+        return
+
+    await interaction.response.send_message(content="Deploy", delete_after=0.5, ephemeral=True)
+    bot.new_thread = await interaction.channel.create_thread(name=bot.new_thread_name, type=discord.ChannelType.public_thread)
+
+    await bot.new_thread.send(
+        get_quote("Deploy"),
+        view=StartButtons(ctx=bot.new_thread, timeout=None),
+    )
+    bot.player_one_member = None
+    bot.player_two_member = None
+
+async def new_game(ctx):
+
+    if not bot.player_one_member:
+        await ctx.send(get_quote("MissingPlayerOne"))
+        return
+
+    if not bot.player_two_member:
+        await ctx.send(get_quote("MissingPlayerTwo"))
+        return
+
+    bot.draft.new_game(bot.draft_file)
+
+    await update_player(ctx=ctx)
+    bot.last_action_message = (
+        get_quote("Start")
+    )
+    await ctx.send(embed=DraftStatusEmbed(), view=ActionButtons(ctx=ctx, timeout=None))
+
+
+# endregion
+
+#region Private Functions
 
 def get_quote(decode):
     return random.choice(bot.game_quotes[decode])
@@ -165,67 +245,6 @@ async def pass_pile(ctx, interaction):
     return True
 
 #endregion
-
-# region Events
-
-@bot.event
-async def on_ready():
-    
-    print(f"User: {bot.user} (ID: {bot.user.id})")
-    bot.tree.copy_global_to(guild=discord.Object(id=1228920937680736327))
-    await bot.tree.sync(guild=discord.Object(id=1228920937680736327))
-    print(f"Synced and ready.")
-
-
-# endregion
-
-# region Commands
-
-@bot.tree.command(name="clear")
-async def clean_up(interaction: discord.Interaction):
-    for thread in interaction.channel.threads:
-        if thread.owner_id == bot.user.id:
-            await thread.delete()
-
-    await interaction.response.send_message(content="Clear!", delete_after=0.5, ephemeral=True)
-
-@bot.tree.command(name="cache")
-async def view_cache(interaction: discord.Interaction):
-    cache = bot.draft.card_cache  
-    await interaction.response.send_message(content=cache, ephemeral=True)  
-
-@bot.tree.command(name="deploy")
-async def deploy(interaction: discord.Interaction):
-    await interaction.response.send_message(content="Deploy!", delete_after=0.5, ephemeral=True)
-    new_thread = await interaction.channel.create_thread(name=bot.new_thread_name, type=discord.ChannelType.public_thread)
-
-    await new_thread.send(
-        get_quote("Deploy"),
-        view=StartButtons(ctx=new_thread, timeout=None),
-    )
-    bot.player_one_member = None
-    bot.player_two_member = None
-
-async def new_game(ctx):
-
-    if not bot.player_one_member:
-        await ctx.send(get_quote("MissingPlayerOne"))
-        return
-
-    if not bot.player_two_member:
-        await ctx.send(get_quote("MissingPlayerTwo"))
-        return
-
-    bot.draft.new_game(bot.draft_file)
-
-    await update_player(ctx=ctx)
-    bot.last_action_message = (
-        get_quote("Start")
-    )
-    await ctx.send(embed=DraftStatusEmbed(), view=ActionButtons(ctx=ctx, timeout=None))
-
-
-# endregion
 
 # region Modals
 
