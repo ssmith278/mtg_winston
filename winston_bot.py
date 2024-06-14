@@ -101,23 +101,12 @@ async def on_ready():
 # endregion
 
 # region Commands
-
 @bot.tree.command(name="close")
 async def shutdown(interaction: discord.Interaction):
 
-    if bot.new_thread:
-        await bot.new_thread.delete()
-    
+    await clean_up(interaction.channel)
     await interaction.response.send_message(content='Stopped', ephemeral=True)
     await bot.close()
-
-@bot.tree.command(name="clear")
-async def clean_up(interaction: discord.Interaction):
-    for thread in interaction.channel.threads:
-        if thread.owner_id == bot.user.id:
-            await thread.delete()
-
-    await interaction.response.send_message(content="Clear", delete_after=0.5, ephemeral=True)
 
 @bot.tree.command(name="cache")
 async def view_cache(interaction: discord.Interaction):
@@ -140,6 +129,13 @@ async def deploy(interaction: discord.Interaction):
     bot.player_one_member = None
     bot.player_two_member = None
 
+
+# endregion
+
+#region Private Functions
+def get_quote(decode):
+    return random.choice(bot.game_quotes[decode])
+
 async def new_game(ctx):
 
     if not bot.player_one_member:
@@ -158,13 +154,14 @@ async def new_game(ctx):
     )
     await ctx.send(embed=DraftStatusEmbed(), view=ActionButtons(ctx=ctx, timeout=None))
 
+async def clean_up(channel: discord.abc.GuildChannel):
+    async for msg in channel.history():
+        if msg.author.id == bot.user.id:
+            await msg.delete()
 
-# endregion
-
-#region Private Functions
-
-def get_quote(decode):
-    return random.choice(bot.game_quotes[decode])
+    for thread in channel.threads:
+        if thread.owner_id == bot.user.id:
+            await thread.delete()
 
 async def send_dm(member: discord.Member, *, message):
     channel = await member.create_dm()
