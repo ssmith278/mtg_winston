@@ -1,15 +1,18 @@
 from datetime import datetime
 from typing import Any
 import discord
-from os import environ
+from os import getenv
+import io
 from dotenv import load_dotenv
 import random
 import winston
 from winston import Players
 from discord.ext import commands
+import nest_asyncio
 
 load_dotenv()
-token = environ["TOKEN"]
+token = getenv("TOKEN")
+nest_asyncio.apply()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -20,7 +23,7 @@ bot.draft = winston.WinstonDraft()
 bot.player_one_member = None
 bot.player_two_member = None
 bot.current_player_member = None
-bot.draft_file = environ["CUBE_FILE_PATH"]
+bot.draft_file = getenv("CUBE_FILE_PATH")
 bot.new_thread_name = "A Grand Campaign"
 bot.game_quotes = {
     "MissingPlayerOne": 
@@ -30,10 +33,11 @@ bot.game_quotes = {
 				["A duel requires two participants! Shall we put out a call for a worthy opponent?"
 				],
     "Deploy": 
-				["Unleash your forces! Let cunning strategy be your weapon!"
+				["A most excellent proposition, old bean! A battle of wits, a clash of minds, a contest of strategic brilliance.",
+                "we shall see who emerges victorious from this grand duel."
 				],
     "Start": 
-				["The clash of minds begins! May the most brilliant strategist prevail!"
+				["The pieces are set, the stage is prepared, and the battle commences!"
 				],
     "CardListInvalid": 
 				["A perplexing mystery! These cards have vanished like Rommel's troops in the desert."
@@ -42,10 +46,12 @@ bot.game_quotes = {
 				["Splendid! Our unconventional weaponry is in place. Let us surprise the enemy!"
 				],
     "PlayerOneSet": 
-				["Ah, our first contender steps into the arena! A bold spirit, I trust."
+				["Ah, our first contender steps into the arena! A bold spirit, I trust.",
+                "A worthy challenger steps forward! Splendid!"
 				],
     "PlayerTwoSet": 
-				["And now, the challenger emerges! The stage is set for a battle of intellects."
+				["And now, the challenger emerges! The stage is set for a battle of intellects.",
+                "To our new challenger, I say this: Bring forth your finest strategies, your most cunning tactics, and your boldest maneuvers."
 				],
     "PlayerOneDuplicate": 
 				["My good fellow, we already have a Player One. Organization is key to victory!"
@@ -54,7 +60,7 @@ bot.game_quotes = {
 				["No need to recruit the same soldier twice! Let's maintain order in the ranks."
 				],
     "NonParticipantAction": 
-				["Ah, a curious observer! But even a wartime leader must respect the secrets of his opponents."
+				["Ah, a curious observer! Fear not, you will see battle yet!"
 				],
     "PlayerPullsFile": 
 				["A survey of your forces - may they serve you well!"
@@ -67,13 +73,16 @@ bot.game_quotes = {
                 "A decisive hand plucks its reward!"
                 ],
     "PassPile": 
-				["A shrewd assessment. Perhaps a greater prize lies ahead."
+				["A shrewd assessment. Perhaps a greater prize lies ahead.",
+                "A classic choice, but one that I shall meet with equal resolve.",
+                "I must admit, you've piqued my curiosity. I shall tread carefully."
 				],
 }
 
 # endregion
 
-#TODO: replace references to bot.game_quotes with get_quote function
+#region Functions
+
 def get_quote(decode):
     return random.choice(bot.game_quotes[decode])
 
@@ -90,22 +99,20 @@ async def respond_with_dm(ctx, message):
 async def send_pulls_file(interaction, file_name):
 
     # write to file
-    with open(file_name, "w") as file:
 
-        if interaction.user.id == bot.player_one_member.id:
-            content = await bot.draft.displayPlayerPulls(1, unformatted_list=True)
-        elif interaction.user.id == bot.player_two_member.id:
-            content = await bot.draft.displayPlayerPulls(2, unformatted_list=True)
+    if interaction.user.id == bot.player_one_member.id:
+        content = await bot.draft.displayPlayerPulls(1, unformatted_list=True)
+    elif interaction.user.id == bot.player_two_member.id:
+        content = await bot.draft.displayPlayerPulls(2, unformatted_list=True)
 
-        file.write(content)
+    file = io.StringIO(content)
 
     # send file to Discord in message
-    with open(file_name, "rb") as file:
-        await interaction.response.send_message(
-            get_quote("PlayerPullsFile"),
-            file=discord.File(file, file_name),
-            ephemeral=True,
-        )
+    await interaction.response.send_message(
+        get_quote("PlayerPullsFile"),
+        file=discord.File(file, file_name),
+        ephemeral=True,
+    )
 
 
 async def update_player(ctx):
@@ -157,45 +164,40 @@ async def pass_pile(ctx, interaction):
 
     return True
 
-# region Events
+#endregion
 
+# region Events
 
 @bot.event
 async def on_ready():
-    print("online")
+    
+    print(f"User: {bot.user} (ID: {bot.user.id})")
+    bot.tree.copy_global_to(guild=discord.Object(id=1228920937680736327))
+    await bot.tree.sync(guild=discord.Object(id=1228920937680736327))
+    print(f"Synced and ready.")
 
 
 # endregion
 
-
 # region Commands
 
-@bot.command(name="clear")
-async def clear_messages(ctx):
-    await ctx.message.delete()
-    async for msg in ctx.channel.history():
-        if msg.author.id == bot.user.id or msg.content.startswith("/"):
-            await msg.delete()
-
-    for thread in ctx.channel.threads:
+@bot.tree.command(name="clear")
+async def clean_up(interaction: discord.Interaction):
+    for thread in interaction.channel.threads:
         if thread.owner_id == bot.user.id:
             await thread.delete()
 
+    await interaction.response.send_message(content="Clear!", delete_after=0.5, ephemeral=True)
 
-# @bot.command(name="godmode")
-# async def god_mode(ctx):
-#     message = bot.draft.displayPickPiles(incl_all_piles=True)
-#     message += bot.draft.displayPlayerPulls(incl_both_players=True)
-#     await respond_with_dm(ctx=ctx, message=message)
+@bot.tree.command(name="cache")
+async def view_cache(interaction: discord.Interaction):
+    cache = bot.draft.card_cache  
+    await interaction.response.send_message(content=cache, ephemeral=True)  
 
-@bot.command(name="cache")
-async def view_cache(ctx):
-    cache = bot.draft.card_cache    
-    await respond_with_dm(ctx=ctx, message=cache)
-
-@bot.command(name="deploy")
-async def deploy(ctx):
-    new_thread = await ctx.message.create_thread(name=bot.new_thread_name)
+@bot.tree.command(name="deploy")
+async def deploy(interaction: discord.Interaction):
+    await interaction.response.send_message(content="Deploy!", delete_after=0.5, ephemeral=True)
+    new_thread = await interaction.channel.create_thread(name=bot.new_thread_name, type=discord.ChannelType.public_thread)
 
     await new_thread.send(
         get_quote("Deploy"),
@@ -204,8 +206,6 @@ async def deploy(ctx):
     bot.player_one_member = None
     bot.player_two_member = None
 
-
-@bot.command(name="start")
 async def new_game(ctx):
 
     if not bot.player_one_member:
@@ -252,7 +252,6 @@ class FileModal(discord.ui.Modal, title='Load Custom Cube List'):
 
 
 # endregion
-
 
 # region Buttons
 class StartButtons(discord.ui.View):
@@ -306,70 +305,6 @@ class StartButtons(discord.ui.View):
         if bot.player_one_member and bot.player_two_member:
             await new_game(self.ctx)
 
-#endregion
-
-#region Embeds
-
-class DraftStatusEmbed(discord.Embed):
-    def __init__(
-        self,
-        *,
-        colour: int | discord.Colour | None = None,
-        color: int | discord.Colour | None = None,
-        title: Any | None = None,
-        url: Any | None = None,
-        description: Any | None = None,
-        timestamp: datetime | None = None,
-    ):
-        super().__init__(
-            colour=colour,
-            color=discord.Colour.brand_green(),
-            title=("-"*25) + get_quote("GameStateTitle") + ("-"*25),
-            type="rich",
-            url=url,
-            description=f"{bot.last_action_message}",
-            timestamp=timestamp,
-        )
-
-        current_pile = bot.draft.pick_piles.current_pile
-
-        draft_pile_count = bot.draft.draft_pile.cardsRemaining()
-        pile_one_count = len(bot.draft.pick_piles.pile_one)
-        pile_two_count = len(bot.draft.pick_piles.pile_two)
-        pile_three_count = len(bot.draft.pick_piles.pile_three)
-
-        player_one_card_count = len(bot.draft.player_pulls[Players.PLAYER_ONE])
-        player_two_card_count = len(bot.draft.player_pulls[Players.PLAYER_TWO])
-
-        self.add_field(
-            name="Current player: ",
-            value=f"{bot.current_player_member.mention}",
-            inline=False,
-        )
-        self.add_field(name=":books:", value=draft_pile_count, inline=False)
-        self.add_field(
-            name=":open_book:" if current_pile.value == 1 else ":blue_book:",
-            value=pile_one_count,
-            inline=True,
-        )
-        self.add_field(
-            name=":open_book:" if current_pile.value == 2 else ":blue_book:",
-            value=pile_two_count,
-            inline=True,
-        )
-        self.add_field(
-            name=":open_book:" if current_pile.value == 3 else ":blue_book:",
-            value=pile_three_count,
-            inline=True,
-        )
-        self.add_field(
-            name="Player One Pulls", value=player_one_card_count, inline=False
-        )
-        self.add_field(
-            name="Player Two Pulls", value=player_two_card_count, inline=False
-        )
-
-
 class ActionButtons(discord.ui.View):
     def __init__(self, ctx, *, timeout=None):
         super().__init__(timeout=timeout)
@@ -379,7 +314,7 @@ class ActionButtons(discord.ui.View):
     async def view_pulls(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        if not bot.draft.in_progress:
+        if not bot.draft.in_progress():
             if interaction.user.id == bot.player_one_member.id:
                 # send player one pulls file
                 await send_pulls_file(
@@ -446,7 +381,69 @@ class ActionButtons(discord.ui.View):
             bot.last_action_message = get_quote("PassPile")
             await interaction.response.edit_message(embed=DraftStatusEmbed(), view=self)
 
-
 # endregion Buttons
+
+#region Embeds
+
+class DraftStatusEmbed(discord.Embed):
+    def __init__(
+        self,
+        *,
+        colour: int | discord.Colour | None = None,
+        color: int | discord.Colour | None = None,
+        title: Any | None = None,
+        url: Any | None = None,
+        description: Any | None = None,
+        timestamp: datetime | None = None,
+    ):
+        super().__init__(
+            colour=colour,
+            color=discord.Colour.brand_green(),
+            title=("-"*25) + get_quote("GameStateTitle") + ("-"*25),
+            type="rich",
+            url=url,
+            description=f"{bot.last_action_message}",
+            timestamp=timestamp,
+        )
+
+        current_pile = bot.draft.pick_piles.current_pile
+
+        draft_pile_count = bot.draft.draft_pile.cardsRemaining()
+        pile_one_count = len(bot.draft.pick_piles.pile_one)
+        pile_two_count = len(bot.draft.pick_piles.pile_two)
+        pile_three_count = len(bot.draft.pick_piles.pile_three)
+
+        player_one_card_count = len(bot.draft.player_pulls[Players.PLAYER_ONE])
+        player_two_card_count = len(bot.draft.player_pulls[Players.PLAYER_TWO])
+
+        self.add_field(
+            name="Current player: ",
+            value=f"{bot.current_player_member.mention}",
+            inline=False,
+        )
+        self.add_field(name=":books:", value=draft_pile_count, inline=False)
+        self.add_field(
+            name=":open_book:" if current_pile.value == 1 else ":blue_book:",
+            value=pile_one_count,
+            inline=True,
+        )
+        self.add_field(
+            name=":open_book:" if current_pile.value == 2 else ":blue_book:",
+            value=pile_two_count,
+            inline=True,
+        )
+        self.add_field(
+            name=":open_book:" if current_pile.value == 3 else ":blue_book:",
+            value=pile_three_count,
+            inline=True,
+        )
+        self.add_field(
+            name="Player One Pulls", value=player_one_card_count, inline=False
+        )
+        self.add_field(
+            name="Player Two Pulls", value=player_two_card_count, inline=False
+        )
+
+#endregion
 
 bot.run(token=token)

@@ -1,7 +1,6 @@
 import random
 import enum
 import time
-import nest_asyncio
 import concurrent.futures
 import scrython
 import scrython.cards
@@ -13,7 +12,7 @@ class Players(enum.Enum):
 
 
 class DraftPile:
-    def __init__(self, file_path, card_limit=60) -> None:
+    def __init__(self, file_path, card_limit=90) -> None:
         self.draft_pile = (
             self.loadCube() if file_path is None else self.loadCube(file_path)
         )
@@ -125,6 +124,13 @@ class PickPiles:
 
     def isLastPile(self):
         return self.current_pile == self.Piles.PILE_THREE
+    
+    def allPilesEmpty(self):
+        for pile in self.pick_piles.values():
+            if pile:
+                return False
+
+        return True
 
 
 class WinstonDraft:
@@ -133,18 +139,15 @@ class WinstonDraft:
         self.thread_pool = concurrent.futures.ThreadPoolExecutor()   
         self.card_thread = {}     
         self.card_cache = {}
-        self.in_progress = False
 
-        nest_asyncio.apply()
+    def in_progress(self):
+        return not (self.draft_pile.isEmpty() and self.pick_piles.allPilesEmpty())
 
     def new_game(self, card_list_file_path):
         self.chooseStartingPlayer()
         self.draft_pile = DraftPile(card_list_file_path)
         self.pick_piles = PickPiles(self.draft_pile)
         self.player_pulls = {Players.PLAYER_ONE: [], Players.PLAYER_TWO: []}
-
-        self.in_progress = True
-
 
     def chooseStartingPlayer(self):
         self.starting_player = random.choice([Players.PLAYER_ONE, Players.PLAYER_TWO])
@@ -169,9 +172,8 @@ class WinstonDraft:
 
         if not self.pick_piles.getCurrentPile():
             if self.pick_piles.isLastPile():
-
-                self.in_progress = False
                 print(f"End of draft.")
+                self.switchPlayer()
                 return
             else:
                 self.pick_piles.moveToNextPile()
@@ -346,4 +348,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    nest_asyncio.asyncio.run(main())
+    main()
