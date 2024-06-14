@@ -1,6 +1,10 @@
 import random
 import enum
-import mtg_card as db
+import time
+import nest_asyncio
+import concurrent.futures
+import scrython
+import scrython.cards
 
 
 class Players(enum.Enum):
@@ -35,9 +39,6 @@ class DraftPile:
 
     def cardsRemaining(self):
         return len(self.draft_pile)
-
-    def isValid(self, card_db : db.CardDatabase):
-        return card_db.is_valid_card_list(self.draft_pile)
 
     def loadCube(self, file_path):
 
@@ -129,9 +130,12 @@ class PickPiles:
 class WinstonDraft:
     def __init__(self) -> None:
 
-        self.card_db = db.CardDatabase("mtg_db.db")
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor()   
+        self.card_thread = {}     
         self.card_cache = {}
         self.in_progress = False
+
+        nest_asyncio.apply()
 
     def new_game(self, card_list_file_path):
         self.chooseStartingPlayer()
@@ -174,42 +178,55 @@ class WinstonDraft:
                 self.takePile()
 
         self.pick_piles.clearCurrentPile()
-        self.pick_piles.addCardToCurrentPile()
+        next_card = self.getNextCard()
+        if next_card:
+            self.pick_piles.getCurrentPile().append(next_card)
 
         self.player_pulls[self.current_player] += selected_pile
         self.switchPlayer()
 
     def passPile(self):
 
-        if not self.draft_pile.isEmpty():
-            self.pick_piles.getCurrentPile().append(self.draft_pile.getNextCard())
+        next_card = self.getNextCard()
+        if next_card:
+            self.pick_piles.getCurrentPile().append(next_card)
 
         if self.pick_piles.isLastPile():
             self.pick_piles.setToFirstPile()
             if self.draft_pile.isEmpty():                
                 return
             else:
-                self.player_pulls[self.current_player].append(self.draft_pile.getNextCard())            
+                next_card = self.getNextCard()
+            if next_card:
+                self.player_pulls[self.current_player].append(next_card)            
 
             self.switchPlayer()
         else:
             self.pick_piles.moveToNextPile()
 
-    def displayPickPiles(self, incl_all_piles=False):
+    def getNextCard(self):
+        next_card = self.draft_pile.getNextCard()
+        
+        #Cache card in background for quicker access later
+        self.card_thread[next_card] = self.thread_pool.submit(self.getScryfallCard, next_card)
+        
+        return next_card
+
+    async def displayPickPiles(self, incl_all_piles=False):
 
         results = "\n"
         if incl_all_piles or self.pick_piles.current_pile == PickPiles.Piles.PILE_ONE:
-            results += f"\n# Pile 1: {self.getPileInfo(self.pick_piles.pile_one)}"
+            results += f"\n# Pile 1: {await self.getPileInfo(self.pick_piles.pile_one)}"
 
         if incl_all_piles or self.pick_piles.current_pile == PickPiles.Piles.PILE_TWO:
-            results += f"\n# Pile 2: {self.getPileInfo(self.pick_piles.pile_two)}"
+            results += f"\n# Pile 2: {await self.getPileInfo(self.pick_piles.pile_two)}"
 
         if incl_all_piles or self.pick_piles.current_pile == PickPiles.Piles.PILE_THREE:
-            results += f"\n# Pile 3: {self.getPileInfo(self.pick_piles.pile_three)}"
+            results += f"\n# Pile 3: {await self.getPileInfo(self.pick_piles.pile_three)}"
 
         return results
 
-    def displayPlayerPulls(self, player_number=None, incl_both_players=False, unformatted_list=False):
+    async def displayPlayerPulls(self, player_number=None, incl_both_players=False, unformatted_list=False):
         results = "\n# Current Pulls:"
         player_one_card_count = len(self.player_pulls[Players.PLAYER_ONE])
         player_two_card_count = len(self.player_pulls[Players.PLAYER_TWO])
@@ -225,7 +242,7 @@ class WinstonDraft:
             results += f"\n## PLAYER_ONE (x{player_one_card_count}): \n\t{self.player_pulls[Players.PLAYER_ONE]}\n"
             results += f"\n## PLAYER_TWO (x{player_two_card_count}): \n\t{self.player_pulls[Players.PLAYER_TWO]}\n"
         elif not unformatted_list:
-            results += self.getPileInfo(self.player_pulls[player_number])
+            results += await self.getPileInfo(self.player_pulls[player_number])
         elif incl_both_players:
             # Unimplmenented
             pass
@@ -251,7 +268,10 @@ class WinstonDraft:
         return results
 
     def printInfo(
-        self, incl_cube_info=False, incl_all_piles=False, incl_both_players=False
+        self, 
+        incl_cube_info=False, 
+        incl_all_piles=False, 
+        incl_both_players=False
     ):
         results = ""
         sample_size = 5
@@ -267,41 +287,36 @@ class WinstonDraft:
 
         print(results)
 
-    def getCardInfo(self, card_name):
+    async def getCardInfo(self, card_name):        
         if card_name not in self.card_cache:
-            self.card_cache[card_name], _ = self.card_db.get_card_by_name(card_name)
 
-        card_info = self.card_cache[card_name]
-        return f"[{card_info.Name}](<{card_info.Uri}>)"
+            if card_name in self.card_thread:
+                self.card_thread[card_name].result()
+            else:
+                self.getScryfallCard(card_name)
 
-    def getPileInfo(self, card_pile):
+        card_info = self.card_cache[card_name].scryfallJson
+        if card_info:
+            return f"[{card_name}](<{card_info['scryfall_uri']}>)"
+        
+        return f"[{card_name}]<URL Not Found>"
+
+    def getScryfallCard(self, card_name):
+        time.sleep(0.1)
+        self.card_cache[card_name] = scrython.cards.Named(exact=card_name) 
+
+    async def getPileInfo(self, card_pile):
         results = ""
         for card in card_pile:
             if card is not None:
-                results += "\n- " + str(self.getCardInfo(card))
+                results += "\n- " + await self.getCardInfo(card)
         return results
 
 
-def main():
+async def main():
 
     draft = WinstonDraft()
     draft.new_game("draft_files/cube.txt")
-
-    validate = True
-    
-    if validate:
-
-        print(f'Validating card list.')
-
-        passed_validation, failed_list = draft.card_db.is_valid_card_list(draft.draft_pile.draft_pile)
-
-        if passed_validation:
-            print(f'Cube list passed validation')
-        else:
-            print(f'The following cards in cube list failed validation:\n')
-            
-        print(failed_list)
-        #return
 
     # Play Random Game
     while (
@@ -316,12 +331,12 @@ def main():
 
     # End Random Game
 
-    message = draft.displayPickPiles(incl_all_piles=True)
-    message += draft.displayPlayerPulls(incl_both_players=True)
+    message = await draft.displayPickPiles(incl_all_piles=True)
+    message += await draft.displayPlayerPulls(incl_both_players=True)
     print(message)
 
-    print(draft.displayPlayerPulls(unformatted_list=True))
+    print(await draft.displayPlayerPulls(unformatted_list=True))
 
 
 if __name__ == "__main__":
-    main()
+    nest_asyncio.asyncio.run(main())
