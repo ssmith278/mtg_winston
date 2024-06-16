@@ -1,7 +1,6 @@
 import discord
 import discord.ext
 import io
-import nest_asyncio
 import random
 from datetime import datetime
 from discord.ext import commands
@@ -14,7 +13,6 @@ from winston import Players
 load_dotenv()
 token = getenv("TOKEN")
 dev_guild_id = getenv("GUILD_ID")
-nest_asyncio.apply()
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -113,28 +111,35 @@ async def view_cache(interaction: discord.Interaction):
     cache = bot.draft.card_cache  
     await interaction.response.send_message(content=cache, ephemeral=True)  
 
+@bot.tree.command(name="restart")
+async def restart(interaction: discord.Interaction):
+    await clean_up(interaction.channel)
+    await new_thread(interaction=interaction)
+
 @bot.tree.command(name="deploy")
 async def deploy(interaction: discord.Interaction):
-    if bot.new_thread:
-        await interaction.response.send_message(content=get_quote("GameInProgress"), delete_after=2)
-        return
 
+    await new_thread(interaction=interaction)
     await interaction.response.send_message(content="Deploy", delete_after=0.5, ephemeral=True)
-    bot.new_thread = await interaction.channel.create_thread(name=bot.new_thread_name, type=discord.ChannelType.public_thread)
-
-    await bot.new_thread.send(
-        get_quote("Deploy"),
-        view=StartButtons(ctx=bot.new_thread, timeout=None),
-    )
     bot.player_one_member = None
     bot.player_two_member = None
-
 
 # endregion
 
 #region Private Functions
 def get_quote(decode):
     return random.choice(bot.game_quotes[decode])
+
+async def new_thread(interaction):
+    if bot.new_thread:
+        await interaction.response.send_message(content=get_quote("GameInProgress"), delete_after=2)
+        return
+    bot.new_thread = await interaction.channel.create_thread(name=bot.new_thread_name, type=discord.ChannelType.public_thread)
+
+    await bot.new_thread.send(
+        get_quote("Deploy"),
+        view=StartButtons(ctx=bot.new_thread, timeout=None),
+    )
 
 async def new_game(ctx):
 
@@ -162,6 +167,8 @@ async def clean_up(channel: discord.abc.GuildChannel):
     for thread in channel.threads:
         if thread.owner_id == bot.user.id:
             await thread.delete()
+
+    bot.new_thread = None
 
 async def send_dm(member: discord.Member, *, message):
     channel = await member.create_dm()
