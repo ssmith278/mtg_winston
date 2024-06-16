@@ -1,9 +1,9 @@
+import asyncio
 import random
 import enum
 import time
 import concurrent.futures
-import scrython
-import scrython.cards
+import card_fetcher
 
 
 class Players(enum.Enum):
@@ -82,9 +82,9 @@ class PickPiles:
     def __init__(self, draft_pile) -> None:
         self.draft_pile = draft_pile
 
-        self.pile_one = [draft_pile.getNextCard()]
-        self.pile_two = [draft_pile.getNextCard()]
-        self.pile_three = [draft_pile.getNextCard()]
+        self.pile_one = []
+        self.pile_two = []
+        self.pile_three = []
 
         self.pick_piles = {
             self.Piles.PILE_ONE: self.pile_one,
@@ -147,6 +147,21 @@ class WinstonDraft:
         self.chooseStartingPlayer()
         self.draft_pile = DraftPile(card_list_file_path)
         self.pick_piles = PickPiles(self.draft_pile)
+        
+        #Initialize piles
+        next_card = self.getNextCard()
+        if next_card:
+            self.pick_piles.pile_one.append(next_card)
+            
+        next_card = self.getNextCard()
+        if next_card:
+            self.pick_piles.pile_two.append(next_card)
+
+        next_card = self.getNextCard()
+        if next_card:
+            self.pick_piles.pile_three.append(next_card)
+
+        #Initialize player pulls
         self.player_pulls = {Players.PLAYER_ONE: [], Players.PLAYER_TWO: []}
 
     def chooseStartingPlayer(self):
@@ -297,7 +312,7 @@ class WinstonDraft:
             else:
                 self.card_cache[card_name] = self.getScryfallCard(card_name)
             
-        card_info = self.card_cache[card_name].scryfallJson if self.card_cache[card_name] else None
+        card_info = self.card_cache[card_name] if self.card_cache[card_name] else None
 
         if card_info:
             return f"[{card_name}](<{card_info['scryfall_uri']}>)"
@@ -305,12 +320,15 @@ class WinstonDraft:
         return f"[{card_name}]<URL Not Found>"
 
     def getScryfallCard(self, card_name):
+        if not card_name:
+            return None
+        
         try:
-            card = scrython.cards.Named(exact=card_name)
+            #Not a fan of scrython's structure since it obfuscates the async API call inside the object init method
+            card = card_fetcher.quick_fetch(card_name, fuzzy=False)
         except:
             card =  None
         finally:
-            time.sleep(0.1)
             return card
 
 
@@ -344,8 +362,8 @@ async def main():
     message += await draft.displayPlayerPulls(incl_both_players=True)
     print(message)
 
-    print(await draft.displayPlayerPulls(unformatted_list=True))
+    print(await draft.displayPlayerPulls(incl_both_players=True, unformatted_list=True))
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
