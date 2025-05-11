@@ -20,6 +20,7 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 
 # region Bot Variables
 bot.draft = WinstonDraft()
+bot.status_messages = {}
 bot.player_one_member = None
 bot.player_two_member = None
 bot.current_player_member = None
@@ -109,7 +110,13 @@ async def shutdown(interaction: discord.Interaction):
 @bot.tree.command(name="cache")
 async def view_cache(interaction: discord.Interaction):
     cache = bot.draft.card_cache  
-    await interaction.response.send_message(content=cache, ephemeral=True)  
+    if interaction.user.id not in bot.status_messages:
+        print(f'Adding message to sent messages')
+        await interaction.response.send_message(content=cache, ephemeral=True)
+        bot.status_messages[interaction.user.id] = interaction.original_response()
+    else:
+        print(f'Fetching and editting sent message for user id {interaction.user.id}')
+        bot.status_messages[interaction.user.id].edit_message(content=cache)
 
 @bot.tree.command(name="restart")
 async def restart(interaction: discord.Interaction):
@@ -343,20 +350,21 @@ class ActionButtons(discord.ui.View):
                 await send_pulls_file(
                     interaction=interaction, file_name="player_one_pulls.txt"
                 )
-                return
-            elif interaction.user.id == bot.player_two_member.id:
+            if interaction.user.id == bot.player_two_member.id:
                 # send player two pulls list
                 await send_pulls_file(
                     interaction=interaction, file_name="player_two_pulls.txt"
                 )
-                return
+                
+            return
 
         message = ""
         if interaction.user.id == bot.player_one_member.id:
-            message = await bot.draft.displayPlayerPulls(1)
-        elif interaction.user.id == bot.player_two_member.id:
-            message = await bot.draft.displayPlayerPulls(2)
-        else:
+            message += await bot.draft.displayPlayerPulls(1)
+        if interaction.user.id == bot.player_two_member.id:
+            message += await bot.draft.displayPlayerPulls(2)
+        
+        if interaction.user.id not in [bot.player_one_member.id, bot.player_two_member.id]:
             message = get_quote("NonParticipantAction")
 
         if len(message) > 2000:
@@ -374,15 +382,25 @@ class ActionButtons(discord.ui.View):
                 message, ephemeral=True, delete_after=10
             )
 
+    async def display_pile(self, interaction: discord.Interaction):
+        if bot.current_player_member.id == interaction.user.id:
+            message = await bot.draft.displayPickPiles()
+            if interaction.user.id not in bot.status_messages:
+                print(f'Adding message to sent messages')
+                await interaction.response.send_message(content=message, ephemeral=True)
+                bot.status_messages[interaction.user.id] = interaction
+            else:
+                print(f'Fetching and editting sent message for user id {interaction.user.id}')
+                await bot.status_messages[interaction.user.id].edit_original_response(content=message)
+                if not interaction.response.is_done():
+                    await interaction.response.edit_message() #just respond to the interaction so it goes away
+
     @discord.ui.button(label="View Pile", style=discord.ButtonStyle.gray)
     async def view_pile_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        if bot.current_player_member.id == interaction.user.id:
-            message = await bot.draft.displayPickPiles()
-            await interaction.response.send_message(
-                message, ephemeral=True, delete_after=10
-            )
+        await self.display_pile(interaction)
+
 
     @discord.ui.button(label="Take", style=discord.ButtonStyle.gray)
     async def take_button(
@@ -394,6 +412,9 @@ class ActionButtons(discord.ui.View):
             bot.last_action_message = get_quote("TakePile")
             await interaction.response.edit_message(embed=DraftStatusEmbed(), view=self)
 
+            await self.display_pile(interaction)
+
+
     @discord.ui.button(label="Pass", style=discord.ButtonStyle.gray)
     async def pass_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
@@ -403,6 +424,9 @@ class ActionButtons(discord.ui.View):
 
             bot.last_action_message = get_quote("PassPile")
             await interaction.response.edit_message(embed=DraftStatusEmbed(), view=self)
+
+            await self.display_pile(interaction)
+
 
 # endregion Buttons
 

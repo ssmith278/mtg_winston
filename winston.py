@@ -315,7 +315,7 @@ class WinstonDraft:
         card_info = self.card_cache[card_name] if self.card_cache[card_name] else None
 
         if card_info:
-            return f"[{card_name}](<{card_info['scryfall_uri']}>)"
+            return f"[{card_name}]({card_info['scryfall_uri']})"
         
         return f"[{card_name}]<URL Not Found>"
 
